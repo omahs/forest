@@ -49,7 +49,10 @@ jobs:
       - name: Checkout Sources
         uses: actions/checkout@v3
       - name: Apt Dependencies
-        run: sudo make install-deps
+        run: |
+          sudo make install-deps
+          # This is required for cargo-spellcheck
+          sudo apt-get install -y libclang-dev
       - uses: actions/cache@v3
         with:
           path: |
