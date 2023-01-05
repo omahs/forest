@@ -26,6 +26,7 @@ use forest_state_manager::StateManager;
 use forest_utils::io::write_to_file;
 use futures::{select, FutureExt};
 use fvm_ipld_blockstore::Blockstore;
+use fvm_shared::clock::ChainEpoch;
 use fvm_shared::version::NetworkVersion;
 use log::{debug, error, info, trace, warn};
 use raw_sync::events::{Event, EventInit, EventState};
@@ -359,7 +360,15 @@ pub(super) async fn start(config: Config, detached: bool) -> Db {
     let config = maybe_fetch_snapshot(should_fetch_snapshot, config).await;
 
     select! {
-        () = sync_from_snapshot(&config, &state_manager).fuse() => {},
+        () = sync_from_snapshot(&config, &state_manager).fuse() => {
+            let epoch = state_manager
+                .chain_store()
+                .heaviest_tipset()
+                .await
+                .unwrap()
+                .epoch();
+            db.write("import-epoch", epoch.to_string()).unwrap();
+        },
         _ = ctrlc_oneshot => {
             // Cancel all async services
             services.shutdown().await;
@@ -373,6 +382,43 @@ pub(super) async fn start(config: Config, detached: bool) -> Db {
         services.shutdown().await;
         return db;
     }
+
+    let epoch_str = db.read("import-epoch").unwrap().unwrap();
+    let snapshot_epoch = std::str::from_utf8(&epoch_str)
+        .unwrap()
+        .parse::<ChainEpoch>()
+        .unwrap();
+
+    services.spawn(async move {
+        info!("---- the snapshot epoch is {snapshot_epoch}");
+
+        //loop {
+        let current_epoch = state_manager
+            .chain_store()
+            .heaviest_tipset()
+            .await
+            .unwrap()
+            .epoch();
+
+        dbg!(current_epoch, snapshot_epoch);
+        //if current_epoch > snapshot_epoch + 10 {
+        info!("--- pruning the db!");
+
+        let tipset = state_manager.chain_store().heaviest_tipset().await.unwrap();
+        state_manager
+            .chain_store()
+            .prune(&tipset, 2000)
+            .await
+            .unwrap();
+
+        // set the new snapshot var
+        //} else {
+        //info!("--- waiting...");
+        //tokio::time::sleep(Duration::from_secs(1)).await;
+        //}
+        Ok(())
+        //}
+    });
 
     services.spawn(p2p_service.run());
 

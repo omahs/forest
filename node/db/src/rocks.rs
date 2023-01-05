@@ -29,11 +29,25 @@ lazy_static::lazy_static! {
     };
 }
 
+#[derive(Debug, Clone)]
+enum DbMode {
+    Normal,
+    GarbageCollecting,
+}
+
+#[derive(Clone, Copy)]
+enum CidState {
+    New,
+    Reachable,
+    Unreachable,
+}
+
 /// `RocksDB` instance this satisfies the [Store] interface.
 #[derive(Clone)]
 pub struct RocksDb {
     pub db: Arc<DB>,
     options: Options,
+    mode: DbMode,
 }
 
 /// `RocksDb` is used as the KV store for Forest
@@ -96,6 +110,7 @@ impl RocksDb {
         Ok(Self {
             db: Arc::new(DB::open(&db_opts, path)?),
             options: db_opts,
+            mode: DbMode::Normal,
         })
     }
 
